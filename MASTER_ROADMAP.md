@@ -1,7 +1,7 @@
 # MASTER ROADMAP: MonteCarlo Greeks (options.inguyen.ca)
 **Target Production Domain:** `https://options.inguyen.ca`  
 **GitHub Repository:** `hanoisolo/monte-carlo-greeks`  
-**Deployment Platform:** Vercel (Edge Static WASM Bundle)  
+**Deployment Platform:** GitHub Pages (Static WASM Bundle)  
 **Primary Engine:** Rust (compiled to `wasm32-unknown-unknown` via `wasm-pack`)  
 **Frontend Framework:** Vanilla ES6+ & HTML5 Canvas 2D bundled with Vite  
 **Test Harness:** Headless Node.js `node:assert/strict` + `cargo test`  
@@ -40,7 +40,6 @@ monte-carlo-greeks\
 ├── AGENTS.md
 ├── package.json
 ├── vite.config.js
-├── vercel.json
 ├── index.html
 ├── plans\
 │   ├── MASTER_ROADMAP.md

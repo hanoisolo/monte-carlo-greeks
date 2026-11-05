@@ -85,15 +85,13 @@ and published by `.github/workflows/deploy.yml` on every push to `main`. The
 workflow runs `npm ci`, the full test suite, `npx vite build`, then publishes
 `dist/` as the Pages artifact. `public/CNAME` pins the custom domain.
 
-`src/wasm/` is **committed on purpose**. Neither the Pages runner nor Vercel's
-build image has a Rust toolchain, so the build step only runs `npx vite build`
-against the prebuilt artifacts. If you change `crates/engine/src/lib.rs`, run
-`npm run build:wasm` and commit the regenerated `src/wasm/` before pushing.
+`src/wasm/` is **committed on purpose**. The Pages runner has no Rust
+toolchain, so the build step only runs `npx vite build` against the prebuilt
+artifacts. If you change `crates/engine/src/lib.rs`, run `npm run build:wasm`
+and commit the regenerated `src/wasm/` before pushing.
 
-`vercel.json` is kept as a ready alternative target (it sets
-`Content-Type: application/wasm` on the wasm asset, without which
-`WebAssembly.instantiateStreaming` fails, plus immutable caching on hashed
-assets). It is not used by the Pages deployment.
+GitHub Pages serves `.wasm` as `application/wasm` natively, so
+`WebAssembly.instantiateStreaming` works without a custom header config.
 
 ### DNS
 
