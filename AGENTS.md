@@ -80,14 +80,31 @@ npx vite build         # production bundle
 
 ## Deployment
 
-`src/wasm/` is **committed on purpose**. Vercel's build image has no Rust
-toolchain, so the build command is `npx vite build` only — it consumes the
-prebuilt artifacts. If you change `crates/engine/src/lib.rs`, you must run
-`npm run build:wasm` and commit the regenerated `src/wasm/` before deploying.
+Production is served by **GitHub Pages** at `https://options.inguyen.ca`, built
+and published by `.github/workflows/deploy.yml` on every push to `main`. The
+workflow runs `npm ci`, the full test suite, `npx vite build`, then publishes
+`dist/` as the Pages artifact. `public/CNAME` pins the custom domain.
 
-`vercel.json` sets `Content-Type: application/wasm` on the wasm asset (without
-it, `WebAssembly.instantiateStreaming` fails) and immutable caching on hashed
-assets.
+`src/wasm/` is **committed on purpose**. Neither the Pages runner nor Vercel's
+build image has a Rust toolchain, so the build step only runs `npx vite build`
+against the prebuilt artifacts. If you change `crates/engine/src/lib.rs`, run
+`npm run build:wasm` and commit the regenerated `src/wasm/` before pushing.
+
+`vercel.json` is kept as a ready alternative target (it sets
+`Content-Type: application/wasm` on the wasm asset, without which
+`WebAssembly.instantiateStreaming` fails, plus immutable caching on hashed
+assets). It is not used by the Pages deployment.
+
+### DNS
+
+`options.inguyen.ca` is a subdomain, so it needs a single CNAME record:
+
+```
+options.inguyen.ca.  CNAME  hanoisolo.github.io.
+```
+
+Do not add an A record for a subdomain. The apex `inguyen.ca` is a separate
+record set and is unaffected.
 
 ## Known limitations
 
