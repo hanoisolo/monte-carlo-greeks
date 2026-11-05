@@ -59,9 +59,10 @@ paths, because the pair mean is the independent unit.
 ### Worker contract
 
 `RUN_SIM { jobId, params }` → `SIM_PROGRESS*` → `SIM_COMPLETE { mc, bs, samplePaths, ... }`,
-or `SIM_CANCELLED` / `SIM_ERROR`. The job is split into 8 chunks so progress can
-stream and cancellation can land between chunks; chunk estimates are averaged
-with variance-weighted standard errors.
+or `SIM_CANCELLED` / `SIM_ERROR`. The job is split into 8 equal chunks so progress
+can stream and cancellation can land between chunks. Chunk estimates are combined
+by an equal-weighted average, with standard errors pooled in quadrature
+(`sqrt(sum(se_i^2)) / chunkCount`).
 
 `runSimulationJob` and `handleMessage` are exported and the `self.onmessage`
 binding is guarded by `typeof self !== 'undefined'`, so the integration test

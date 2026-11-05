@@ -3,9 +3,10 @@
 // The WASM engine is synchronous, so a single 1,000,000-path call would block
 // the worker's message queue and make cancellation impossible. Instead the job
 // is split into chunks: each chunk is an independent Monte Carlo estimate with
-// its own deterministic seed, and the chunk estimates are combined by averaging
-// with variance-weighted standard errors. That keeps the result deterministic
-// while letting progress stream and cancellation land between chunks.
+// its own deterministic seed, and the chunk estimates are combined by an
+// equal-weighted average with standard errors pooled in quadrature. That keeps
+// the result deterministic while letting progress stream and cancellation land
+// between chunks.
 //
 // `runSimulationJob` is exported so the headless integration test can drive the
 // exact same code path without a Worker global.
