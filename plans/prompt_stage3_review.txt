@@ -1,0 +1,12 @@
+# STAGE 3 — PLAN REVIEW (adversarial, be concise)
+
+Review `plans/PLAN.md` (attached) against `plans/stage2_blueprint.md` (attached). I revised your blueprint; the revisions are listed in section R of the plan.
+
+Focus your review on:
+1. Are the 9 segments correctly ordered so each gate can actually run at its position?
+2. Is any gate too weak to prove its segment (especially P1-S1, P2-S2, P3-S1)?
+3. Does R2 (committing `src/wasm/` artifacts so Vercel needs no Rust) create any correctness or repo-hygiene problem?
+4. Does R1 (GitHub connector instead of `gh` CLI) leave any gap in the release segment?
+5. Any missed edge case that will break a later segment — particularly the `--target web` + Node `init({ module_or_path })` path, and `mc_paths_sample` returning a flat `Float64Array` across the WASM boundary.
+
+Be adversarial but brief. Max ~600 words. End with a single verdict line, exactly one of: `APPROVED`, `APPROVED WITH CHANGES`, `REJECTED`. If not plain APPROVED, list the exact changes required as a numbered list. Plain Markdown only.

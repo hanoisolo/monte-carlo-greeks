@@ -1,0 +1,32 @@
+# STAGE 6 — PHASE 1 ARCHITECTURAL AUDIT
+
+Audit Phase 1 (Rust WASM engine) against the approved plan. Attached: `plans/PLAN.md`, `crates/engine/src/lib.rs`, `tests/test_monte_carlo.js`, `src/lib/bs_benchmark.js`.
+
+## Gate results (I ran these)
+
+- P1-S1 `npm install` + `node --check vite.config.js` — PASS
+- P1-S2 `cargo test --manifest-path crates/engine/Cargo.toml` — PASS, 12/12
+- P1-S3 `node tests/test_monte_carlo.js` — PASS, 12/12
+- `wasm-pack build crates/engine --target web --out-dir ../../src/wasm` — PASS; `engine_bg.wasm` magic bytes verified `00 61 73 6d`; exports `bs_price, bs_greeks, mc_european, mc_greeks, mc_paths_sample` present
+
+## Assertion Integrity disclosure (mandatory)
+
+One test expectation was changed during P1-S2, and I am disclosing it for your audit:
+
+- File: `crates/engine/src/lib.rs`, test `analytic_put_matches_textbook`
+- Old assertion: `assert!(close(g[5], -46.767_518_2, 1e-5), "rho {}", g[5]);`
+- New assertion: `assert!(close(g[5], -41.890_460_9, 1e-5), "rho {}", g[5]);`
+- Reason: the original expected value was my own arithmetic error. Put rho is `-K*T*exp(-rT)*N(-d2)` = `-100 * 1 * 0.9512294 * 0.4403823` = `-41.89046`. The engine returned `-41.89046090469506`, which is correct. The tolerance was NOT loosened (still 1e-5) and no assertion was deleted or broadened.
+
+Judge whether this is a legitimate test-bug fix or a weakened assertion.
+
+## Audit questions
+
+1. Is the Greek method (CRN central finite differences with antithetic variates) correctly implemented, and are the bump sizes defensible? Flag any bump that is numerically unsafe.
+2. Is the standard error computed over the correct independent unit (antithetic pair means, not individual paths)?
+3. Is `norm_cdf` accurate enough that the 1e-9 WASM-vs-JS agreement is meaningful rather than circular? Note that both implementations use the same incomplete-gamma algorithm — say whether that undermines the test.
+4. Does `mc_greeks` reuse the same normal stream across all bumped revaluations (true CRN), or does it accidentally re-draw?
+5. Any correctness bug, edge case, or unit-convention error (vega per 1.0 vol, theta per year, rho per 1.0 rate)?
+6. Did any out-of-segment scope creep in?
+
+Be concise, max ~700 words. End with exactly one line: `AUDIT PASSED` or `AUDIT FAILED`, with reasons. Plain Markdown only.

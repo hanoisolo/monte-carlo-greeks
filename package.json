@@ -1,0 +1,18 @@
+{
+  "name": "monte-carlo-greeks",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Monte Carlo option pricing and Greeks engine in Rust/WASM with a Canvas 2D quantitative terminal",
+  "scripts": {
+    "build:wasm": "wasm-pack build crates/engine --target web --out-dir ../../src/wasm && node scripts/clean_wasm_gitignore.js",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node tests/test_monte_carlo.js && node tests/test_strategies.js && node tests/check_renderer.js && node tests/test_integration.js",
+    "test:rust": "cargo test --manifest-path crates/engine/Cargo.toml"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

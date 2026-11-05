@@ -1,0 +1,24 @@
+# STAGE 6 — PHASE 2 ARCHITECTURAL AUDIT
+
+Audit Phase 2 (quantitative UI) against the approved plan. Attached: `plans/PLAN.md`, `src/lib/strategies.js`, `tests/test_strategies.js`, `src/lib/canvas_renderer.js`, `tests/check_renderer.js`, `index.html`.
+
+## Gate results (I ran these)
+
+- P2-S1 `node tests/test_strategies.js` — PASS, 17/17
+- P2-S2 `node tests/check_renderer.js` — PASS, 10/10
+- P2-S3 `npx vite build` — PASS, exit 0, emitted `dist/index.html`, CSS, JS, favicon, banner
+
+## Assertion Integrity disclosure
+
+No assertion was changed, weakened, or deleted in Phase 2. All Phase 2 test files are new. The Phase 1 disclosure (put rho expectation corrected from `-46.7675182` to `-41.8904609` at unchanged 1e-5 tolerance) was already ruled a legitimate test-bug fix in the Phase 1 audit.
+
+## Audit questions
+
+1. **Strategy math.** Is `aggregateStrategy` correct in treating net Greeks as a linear combination weighted by `side * qty`? Is `aggregateStrategyMonteCarlo` correct to reuse the same seed across legs (portfolio CRN), and is summing `(weight * stdErr)^2` then square-rooting a defensible net standard error given the legs are correlated?
+2. **Payoff geometry.** Are the seven presets' strike factors economically sensible? Check the Iron Condor (long 85 put, short 95 put, short 105 call, long 115 call) and the Butterfly (long 90 call, short 2x 100 call, long 110 call) specifically — are the payoff assertions in the test actually true, or do they pass by accident?
+3. **Breakeven solver.** `findBreakevens` interpolates zero crossings on a 4001-point grid. Is that robust for a payoff with a kink exactly at a strike? Any case where it silently misses a root?
+4. **Renderer contract.** The renderers take explicit width/height and only use standard 2D context methods. Is the mock-context test meaningful, or does it only prove the functions do not throw? Name what it fails to catch.
+5. **UI correctness.** Does `index.html` expose every control the P3-S1 controller will need, and are the units in the table legend consistent with the engine (vega per 1.0 vol, theta per year, rho per 1.0 rate)?
+6. Any out-of-segment scope creep?
+
+Be concise, max ~700 words. End with exactly one line: `AUDIT PASSED` or `AUDIT FAILED`, with reasons. Plain Markdown only.

@@ -1,0 +1,17 @@
+{
+  "name": "engine",
+  "type": "module",
+  "description": "Monte Carlo option pricing and Greeks engine compiled to WebAssembly",
+  "version": "0.1.0",
+  "license": "MIT",
+  "files": [
+    "engine_bg.wasm",
+    "engine.js",
+    "engine.d.ts"
+  ],
+  "main": "engine.js",
+  "types": "engine.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

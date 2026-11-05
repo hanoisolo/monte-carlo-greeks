@@ -1,0 +1,34 @@
+# STAGE 2 — BLUEPRINT (be concise)
+
+Greenfield repo, only `MASTER_ROADMAP.md` exists (attached). No code yet.
+
+Env: Windows/Git Bash. node 24.21, npm 11.12, rustc 1.94, wasm-pack 0.15.1, wasm32-unknown-unknown installed, git 2.47. No `gh`, no `vercel` CLI. GitHub connector available.
+
+Stack is fixed: Rust->wasm32 via wasm-pack; vanilla ES6 + Canvas 2D + Vite; tests = headless Node `node:assert/strict` + `cargo test`; deploy Vercel static at options.inguyen.ca.
+
+Gates must be ONE plain command: no `>`, no `2>`, no `$?`, no `X=...`, no pipes to files.
+
+Deliver a COMPACT blueprint, max ~1200 words, these sections only:
+
+## A. Engine API
+Exact exported Rust fn names + arg order + return types for: bs_price, bs_greeks (delta/gamma/vega/theta/rho), mc_european, mc_greeks. State Greek method (bump-and-reprice vs pathwise) and RNG+seeding for determinism. State units for vega (per 1.0 vol) and theta (per year).
+
+## B. WASM boundary
+Which wasm-pack `--target` for Vite vs for Node tests, exact build commands, exact import path per consumer. This is the top integration risk — be precise.
+
+## C. Worker contract
+Request/response message shapes, progress streaming, cancellation, Vite worker instantiation.
+
+## D. Segments
+Ordered segments across Phase 1 (Rust engine), Phase 2 (UI), Phase 3 (worker+integration+git+deploy). Max 3 files per segment. For EACH segment give exactly:
+- Files & functions
+- Goal (1-2 sentences)
+- Verification Gate: one plain CLI command + the assertions it must satisfy
+
+## E. Top 5 traps
+Monte Carlo Greek correctness, WASM boundary, numerical. One line each, naming the segment that neutralizes it.
+
+## F. Test tolerances
+Per test file: what it asserts, path count, tolerance, and why it is deterministic (not flaky).
+
+End with assumptions and risks. Plain Markdown only.

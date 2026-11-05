@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Monte Carlo Greeks — options.inguyen.ca</title>
+    <meta
+      name="description"
+      content="Monte Carlo option pricing and Greeks computed in Rust/WebAssembly, benchmarked against closed-form Black-Scholes."
+    />
+    <link rel="icon" href="/assets/favicon.ico" />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="masthead">
+        <img
+          class="banner"
+          src="/assets/banner_terminal.jpg"
+          alt="Monte Carlo price paths fanning across a terminal grid"
+        />
+        <div class="masthead-text">
+          <h1>MONTE CARLO GREEKS</h1>
+          <p class="tagline">
+            Rust &rarr; WebAssembly pricing engine &middot; antithetic variates &middot;
+            common-random-number finite differences
+          </p>
+        </div>
+        <div class="engine-badge" id="engine-badge" data-state="loading">
+          <span class="dot"></span>
+          <span id="engine-status">LOADING WASM</span>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel controls" aria-label="Simulation parameters">
+          <h2>Parameters</h2>
+
+          <div class="field">
+            <label for="strategy">Strategy</label>
+            <select id="strategy"></select>
+            <p class="hint" id="strategy-description"></p>
+          </div>
+
+          <div class="field-grid">
+            <div class="field">
+              <label for="spot">Spot <span class="unit">S</span></label>
+              <input id="spot" type="number" value="100" min="1" max="10000" step="0.5" />
+            </div>
+            <div class="field">
+              <label for="strike">Strike <span class="unit">K</span></label>
+              <input id="strike" type="number" value="100" min="1" max="10000" step="0.5" />
+            </div>
+            <div class="field">
+              <label for="time">Maturity <span class="unit">years</span></label>
+              <input id="time" type="number" value="1" min="0.01" max="10" step="0.05" />
+            </div>
+            <div class="field">
+              <label for="rate">Rate <span class="unit">r</span></label>
+              <input id="rate" type="number" value="0.05" min="-0.05" max="0.5" step="0.005" />
+            </div>
+            <div class="field">
+              <label for="dividend">Dividend <span class="unit">q</span></label>
+              <input id="dividend" type="number" value="0" min="0" max="0.3" step="0.005" />
+            </div>
+            <div class="field">
+              <label for="volatility">Volatility <span class="unit">&sigma;</span></label>
+              <input id="volatility" type="number" value="0.2" min="0.01" max="2" step="0.01" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="paths">
+              Paths <span class="unit" id="paths-readout">100,000</span>
+            </label>
+            <input id="paths" type="range" min="10000" max="1000000" step="10000" value="100000" />
+          </div>
+
+          <div class="field">
+            <label for="seed">Seed <span class="unit">deterministic</span></label>
+            <input id="seed" type="number" value="42" min="0" step="1" />
+          </div>
+
+          <div class="actions">
+            <button id="run" type="button" class="primary">Run simulation</button>
+            <button id="cancel" type="button" class="ghost" disabled>Cancel</button>
+          </div>
+
+          <div class="progress" id="progress-wrap" hidden>
+            <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+            <span class="progress-label" id="progress-label">0%</span>
+          </div>
+
+          <dl class="meta">
+            <div><dt>Elapsed</dt><dd id="elapsed">&mdash;</dd></div>
+            <div><dt>Std. error</dt><dd id="std-error">&mdash;</dd></div>
+            <div><dt>WASM vs JS</dt><dd id="benchmark">&mdash;</dd></div>
+          </dl>
+        </section>
+
+        <section class="panel results" aria-label="Greeks comparison">
+          <h2>Greeks &mdash; Monte Carlo vs Black-Scholes</h2>
+          <table class="greeks-table">
+            <thead>
+              <tr>
+                <th scope="col">Greek</th>
+                <th scope="col">Monte Carlo</th>
+                <th scope="col">Analytic</th>
+                <th scope="col">Abs. diff</th>
+                <th scope="col">Rel. diff</th>
+              </tr>
+            </thead>
+            <tbody id="greeks-body">
+              <tr><td colspan="5" class="empty">Run a simulation to populate.</td></tr>
+            </tbody>
+          </table>
+          <p class="legend">
+            Vega is per 1.00 of volatility, theta per 1.00 year of calendar decay, rho per
+            1.00 of the risk-free rate.
+          </p>
+        </section>
+
+        <section class="panel viewports" aria-label="Charts">
+          <div class="tabs" role="tablist">
+            <button role="tab" class="tab active" data-view="paths" aria-selected="true">
+              Price paths
+            </button>
+            <button role="tab" class="tab" data-view="payoff" aria-selected="false">
+              Payoff &amp; P&amp;L
+            </button>
+            <button role="tab" class="tab" data-view="convergence" aria-selected="false">
+              Convergence
+            </button>
+          </div>
+          <div class="canvas-stack">
+            <canvas id="canvas-paths" class="viewport active" height="360"></canvas>
+            <canvas id="canvas-payoff" class="viewport" height="360"></canvas>
+            <canvas id="canvas-convergence" class="viewport" height="360"></canvas>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>options.inguyen.ca</span>
+        <span id="footer-status">engine idle</span>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
