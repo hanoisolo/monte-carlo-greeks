@@ -141,24 +141,117 @@ export function bsPrice(s, k, t, r, q, sigma, isCall) {
 }
 
 /**
+ * Analytic Merton jump-diffusion price and Greeks.
+ *
+ * The terminal law is a Poisson mixture of lognormals, so the price is a
+ * weighted sum of Black-Scholes prices at a shifted rate and volatility:
+ *
+ *   P       = sum_n w_n * BS(S, K, T, r_n, sigma_n)
+ *   w_n     = e^{-L} L^n / n!,   L = lambda * T * (1 + kappa)
+ *   sigma_n = sqrt(sigma^2 + n * deltaJ^2 / T)
+ *   r_n     = r - lambda * kappa + n * ln(1 + kappa) / T
+ *   kappa   = exp(muJ + deltaJ^2 / 2) - 1
+ *
+ * The weight p_n(lambda * T * (1 + kappa)) paired with r_n is algebraically
+ * identical to p_n(lambda * T) paired with a dividend yield of
+ * q + lambda * kappa - n * ln(1 + kappa) / T. Both give the same price to
+ * machine precision; this form is used because it reuses bsGreeks unchanged.
+ * Do not "fix" one of the two into the other.
+ *
+ * Vega is the sensitivity to the diffusion volatility with the jump parameters
+ * held fixed, so each term carries the chain-rule factor
+ * d sigma_n / d sigma = sigma / sigma_n. Omitting it overstates vega by about
+ * 20% at lambda = 1.
+ *
+ * Theta is the exact total derivative -dP/dT. Maturity enters the weights, the
+ * shifted volatility and the shifted rate, so a weighted sum of the
+ * Black-Scholes thetas would be wrong. The three trailing terms account for
+ * dw_n/dT, dr_n/dT and d sigma_n/dT respectively.
+ *
+ * Units match the Rust engine: vega per 1.0 of volatility, theta per 1.0 year
+ * of calendar decay, rho per 1.0 of the risk-free rate.
+ */
+export function mertonGreeks(s, k, t, r, q, sigma, isCall, lambda, muJ, deltaJ) {
+  if (lambda <= 0 || t <= 0 || sigma <= 0 || s <= 0 || k <= 0) {
+    return bsGreeks(s, k, t, r, q, sigma, isCall);
+  }
+
+  const kappa = Math.exp(muJ + 0.5 * deltaJ * deltaJ) - 1;
+  const ln1pk = Math.log(1 + kappa);
+  const L = lambda * t * (1 + kappa);
+
+  let price = 0;
+  let delta = 0;
+  let gamma = 0;
+  let vega = 0;
+  let theta = 0;
+  let rho = 0;
+
+  let w = Math.exp(-L);
+  for (let n = 0; n <= 500; n += 1) {
+    if (n > 0) w *= L / n;
+    // Only test for convergence past the Poisson mode. Testing earlier would
+    // terminate at n = 0 whenever e^{-L} is itself below the threshold, which
+    // happens for L above about 35.
+    if (n > L && w < 1e-15) break;
+
+    const sigmaN = Math.sqrt(sigma * sigma + (n * deltaJ * deltaJ) / t);
+    const rN = r - lambda * kappa + (n * ln1pk) / t;
+    const g = bsGreeks(s, k, t, rN, q, sigmaN, isCall);
+
+    price += w * g.price;
+    delta += w * g.delta;
+    gamma += w * g.gamma;
+    vega += w * g.vega * (sigma / sigmaN);
+    rho += w * g.rho;
+    theta +=
+      w *
+      (g.theta -
+        ((n - L) / t) * g.price +
+        ((n * ln1pk) / (t * t)) * g.rho +
+        ((n * deltaJ * deltaJ) / (2 * t * t * sigmaN)) * g.vega);
+  }
+
+  return { price, delta, gamma, vega, theta, rho };
+}
+
+export function mertonPrice(s, k, t, r, q, sigma, isCall, lambda, muJ, deltaJ) {
+  return mertonGreeks(s, k, t, r, q, sigma, isCall, lambda, muJ, deltaJ).price;
+}
+
+/**
  * Times the WASM engine against this JS reference over `iterations` calls.
  * Returns per-call microsecond timings and the max absolute price difference,
  * so the UI can show that the WASM path is both faster and correct.
+ *
+ * Dispatches on `params.model`, so the benchmark measures the model the user
+ * actually selected rather than always timing Black-Scholes.
  */
 export function benchmarkEngine(engine, params, iterations = 2000) {
   const { s, k, t, r, q, sigma, isCall } = params;
+  const useMerton = params.model === 'merton' && typeof engine.merton_price === 'function';
+  const lambda = params.lambda ?? 0;
+  const muJ = params.muJ ?? 0;
+  const deltaJ = params.deltaJ ?? 0;
+
+  const wasmCall = useMerton
+    ? () => engine.merton_price(s, k, t, r, q, sigma, isCall, lambda, muJ, deltaJ)
+    : () => engine.bs_price(s, k, t, r, q, sigma, isCall);
+  const jsCall = useMerton
+    ? () => mertonPrice(s, k, t, r, q, sigma, isCall, lambda, muJ, deltaJ)
+    : () => bsPrice(s, k, t, r, q, sigma, isCall);
 
   const wasmStart = performance.now();
   let wasmPrice = 0;
   for (let i = 0; i < iterations; i += 1) {
-    wasmPrice = engine.bs_price(s, k, t, r, q, sigma, isCall);
+    wasmPrice = wasmCall();
   }
   const wasmMs = performance.now() - wasmStart;
 
   const jsStart = performance.now();
   let jsPrice = 0;
   for (let i = 0; i < iterations; i += 1) {
-    jsPrice = bsPrice(s, k, t, r, q, sigma, isCall);
+    jsPrice = jsCall();
   }
   const jsMs = performance.now() - jsStart;
 

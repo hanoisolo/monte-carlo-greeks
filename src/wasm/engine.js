@@ -79,6 +79,87 @@ export function mc_greeks(s, k, t, r, q, sigma, is_call, n_paths, seed) {
 }
 
 /**
+ * Antithetic-variate Monte Carlo Merton price as [price, std_err].
+ * @param {number} s
+ * @param {number} k
+ * @param {number} t
+ * @param {number} r
+ * @param {number} q
+ * @param {number} sigma
+ * @param {boolean} is_call
+ * @param {number} lambda
+ * @param {number} mu_j
+ * @param {number} delta_j
+ * @param {number} n_paths
+ * @param {bigint} seed
+ * @returns {Float64Array}
+ */
+export function mc_merton_european(s, k, t, r, q, sigma, is_call, lambda, mu_j, delta_j, n_paths, seed) {
+    const ret = wasm.mc_merton_european(s, k, t, r, q, sigma, is_call, lambda, mu_j, delta_j, n_paths, seed);
+    var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+    return v1;
+}
+
+/**
+ * Monte Carlo Merton Greeks by central finite differences with common random
+ * numbers, as [price, std_err, delta, gamma, vega, theta, rho].
+ *
+ * The jump count is drawn once per path and held fixed across every bumped
+ * revaluation. Redrawing it per bump would contaminate the bump difference
+ * with jump-count noise and make the Greeks meaningless.
+ *
+ * Theta needs one extra term. Holding the jump count fixed differentiates the
+ * payoff with respect to maturity but leaves the Poisson intensity frozen, so
+ * the estimator misses `d/dT` of the jump-count distribution. That missing
+ * piece is exactly `lambda * E[f(T, N+1) - f(T, N)]`, which the `n_up`
+ * accumulator evaluates with the same random draws. Without it theta is biased
+ * by about -3.42 at the benchmark parameters, a 45% error.
+ * @param {number} s
+ * @param {number} k
+ * @param {number} t
+ * @param {number} r
+ * @param {number} q
+ * @param {number} sigma
+ * @param {boolean} is_call
+ * @param {number} lambda
+ * @param {number} mu_j
+ * @param {number} delta_j
+ * @param {number} n_paths
+ * @param {bigint} seed
+ * @returns {Float64Array}
+ */
+export function mc_merton_greeks(s, k, t, r, q, sigma, is_call, lambda, mu_j, delta_j, n_paths, seed) {
+    const ret = wasm.mc_merton_greeks(s, k, t, r, q, sigma, is_call, lambda, mu_j, delta_j, n_paths, seed);
+    var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+    return v1;
+}
+
+/**
+ * Flattened row-major Merton sample paths, including compound Poisson jumps,
+ * of length `n_paths * (n_steps + 1)`. Each row starts at `s`.
+ * @param {number} s
+ * @param {number} t
+ * @param {number} r
+ * @param {number} q
+ * @param {number} sigma
+ * @param {number} lambda
+ * @param {number} mu_j
+ * @param {number} delta_j
+ * @param {number} n_paths
+ * @param {number} n_steps
+ * @param {bigint} seed
+ * @returns {Float64Array}
+ */
+export function mc_merton_paths_sample(s, t, r, q, sigma, lambda, mu_j, delta_j, n_paths, n_steps, seed) {
+    const ret = wasm.mc_merton_paths_sample(s, t, r, q, sigma, lambda, mu_j, delta_j, n_paths, n_steps, seed);
+    var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+    return v1;
+}
+
+/**
  * Flattened row-major sample paths of length `n_paths * (n_steps + 1)` for
  * the Canvas fan chart. Each row starts at `s`.
  * @param {number} s
@@ -96,6 +177,51 @@ export function mc_paths_sample(s, t, r, q, sigma, n_paths, n_steps, seed) {
     var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
     return v1;
+}
+
+/**
+ * Merton jump-diffusion analytic Greeks as
+ * [price, delta, gamma, vega, theta, rho].
+ *
+ * Units match `bs_greeks`: vega per 1.00 of the diffusion volatility with the
+ * jump parameters held fixed, theta per 1.00 year of calendar decay, rho per
+ * 1.00 of the risk-free rate.
+ * @param {number} s
+ * @param {number} k
+ * @param {number} t
+ * @param {number} r
+ * @param {number} q
+ * @param {number} sigma
+ * @param {boolean} is_call
+ * @param {number} lambda
+ * @param {number} mu_j
+ * @param {number} delta_j
+ * @returns {Float64Array}
+ */
+export function merton_greeks(s, k, t, r, q, sigma, is_call, lambda, mu_j, delta_j) {
+    const ret = wasm.merton_greeks(s, k, t, r, q, sigma, is_call, lambda, mu_j, delta_j);
+    var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+    return v1;
+}
+
+/**
+ * Merton jump-diffusion European option price.
+ * @param {number} s
+ * @param {number} k
+ * @param {number} t
+ * @param {number} r
+ * @param {number} q
+ * @param {number} sigma
+ * @param {boolean} is_call
+ * @param {number} lambda
+ * @param {number} mu_j
+ * @param {number} delta_j
+ * @returns {number}
+ */
+export function merton_price(s, k, t, r, q, sigma, is_call, lambda, mu_j, delta_j) {
+    const ret = wasm.merton_price(s, k, t, r, q, sigma, is_call, lambda, mu_j, delta_j);
+    return ret;
 }
 function __wbg_get_imports() {
     const import0 = {

@@ -11,7 +11,14 @@
 // `runSimulationJob` is exported so the headless integration test can drive the
 // exact same code path without a Worker global.
 
-import init, { bs_greeks, mc_greeks, mc_paths_sample } from '../wasm/engine.js';
+import init, {
+  bs_greeks,
+  mc_greeks,
+  mc_paths_sample,
+  merton_greeks,
+  mc_merton_greeks,
+  mc_merton_paths_sample,
+} from '../wasm/engine.js';
 
 export const CHUNK_COUNT = 8;
 
@@ -56,6 +63,10 @@ export async function runSimulationJob(engine, params, hooks = {}) {
     seed,
     nSamplePaths = 64,
     nSteps = 50,
+    model = 'bs',
+    lambda = 0,
+    muJ = 0,
+    deltaJ = 0,
   } = params;
 
   if (!Array.isArray(legs) || legs.length === 0) {
@@ -64,6 +75,23 @@ export async function runSimulationJob(engine, params, hooks = {}) {
   if (!Number.isFinite(nPaths) || nPaths < 2) {
     throw new Error(`runSimulationJob requires nPaths >= 2, got ${nPaths}`);
   }
+
+  // Model dispatch lives here so the chunk loop, the analytic benchmark and the
+  // fan chart cannot drift apart. Defaulting to 'bs' keeps every existing
+  // caller and the hand-built engine mock in the integration test working.
+  const useMerton = model === 'merton';
+  const mcLeg = useMerton
+    ? (strike, isCall, n, sd) =>
+        engine.mc_merton_greeks(s, strike, t, r, q, sigma, isCall, lambda, muJ, deltaJ, n, sd)
+    : (strike, isCall, n, sd) => engine.mc_greeks(s, strike, t, r, q, sigma, isCall, n, sd);
+  const analyticLeg = useMerton
+    ? (strike, isCall) =>
+        engine.merton_greeks(s, strike, t, r, q, sigma, isCall, lambda, muJ, deltaJ)
+    : (strike, isCall) => engine.bs_greeks(s, strike, t, r, q, sigma, isCall);
+  const samplePathsFor = useMerton
+    ? (np, ns, sd) =>
+        engine.mc_merton_paths_sample(s, t, r, q, sigma, lambda, muJ, deltaJ, np, ns, sd)
+    : (np, ns, sd) => engine.mc_paths_sample(s, t, r, q, sigma, np, ns, sd);
 
   const seedBig = BigInt(seed);
   const chunkCount = Math.min(CHUNK_COUNT, Math.max(1, Math.floor(nPaths / 2)));
@@ -91,7 +119,7 @@ export async function runSimulationJob(engine, params, hooks = {}) {
     for (const leg of legs) {
       const isCall = leg.type === 'call';
       const weight = leg.side * leg.qty;
-      const g = engine.mc_greeks(s, leg.strike, t, r, q, sigma, isCall, perChunk, chunkSeed);
+      const g = mcLeg(leg.strike, isCall, perChunk, chunkSeed);
       priceSum += weight * g[0];
       varianceSum += (weight * g[1]) ** 2;
       deltaSum += weight * g[2];
@@ -133,7 +161,7 @@ export async function runSimulationJob(engine, params, hooks = {}) {
   let bsRho = 0;
   for (const leg of legs) {
     const weight = leg.side * leg.qty;
-    const g = engine.bs_greeks(s, leg.strike, t, r, q, sigma, leg.type === 'call');
+    const g = analyticLeg(leg.strike, leg.type === 'call');
     bsPrice += weight * g[0];
     bsDelta += weight * g[1];
     bsGamma += weight * g[2];
@@ -150,16 +178,7 @@ export async function runSimulationJob(engine, params, hooks = {}) {
     rho: bsRho,
   };
 
-  const samplePaths = engine.mc_paths_sample(
-    s,
-    t,
-    r,
-    q,
-    sigma,
-    nSamplePaths,
-    nSteps,
-    seedBig,
-  );
+  const samplePaths = samplePathsFor(nSamplePaths, nSteps, seedBig);
 
   return {
     elapsedMs: Date.now() - started,
@@ -170,6 +189,7 @@ export async function runSimulationJob(engine, params, hooks = {}) {
     nSteps,
     legs,
     totalPaths,
+    model,
   };
 }
 
@@ -229,7 +249,14 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
     try {
       await ensureEngine();
       await handleMessage(
-        { mc_greeks, mc_paths_sample, bs_greeks },
+        {
+          mc_greeks,
+          mc_paths_sample,
+          bs_greeks,
+          merton_greeks,
+          mc_merton_greeks,
+          mc_merton_paths_sample,
+        },
         event.data,
         post,
         state,

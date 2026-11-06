@@ -216,6 +216,12 @@ body {
   gap: 0 12px;
 }
 
+/* An author `display` rule beats the UA stylesheet's `[hidden] { display: none }`,
+   so the attribute alone would not hide this grid. */
+.field-grid[hidden] {
+  display: none;
+}
+
 input[type="number"],
 select {
   width: 100%;

@@ -5,7 +5,7 @@
 // benchmark) is cheap enough to run on the main thread.
 
 import './styles.css';
-import init, { bs_greeks } from './wasm/engine.js';
+import init, { bs_greeks, merton_greeks } from './wasm/engine.js';
 import { benchmarkEngine } from './lib/bs_benchmark.js';
 import {
   STRATEGY_PRESETS,
@@ -33,6 +33,12 @@ const els = {
   rate: $('rate'),
   dividend: $('dividend'),
   volatility: $('volatility'),
+  model: $('model'),
+  modelDescription: $('model-description'),
+  jumpParams: $('jump-params'),
+  lambda: $('lambda'),
+  muJ: $('mu-j'),
+  deltaJ: $('delta-j'),
   paths: $('paths'),
   pathsReadout: $('paths-readout'),
   seed: $('seed'),
@@ -101,6 +107,10 @@ function readParams() {
     legs: buildLegs(preset, strike),
     nSamplePaths: 64,
     nSteps: 50,
+    model: els.model.value,
+    lambda: Number(els.lambda.value),
+    muJ: Number(els.muJ.value),
+    deltaJ: Number(els.deltaJ.value),
   };
 }
 
@@ -311,12 +321,25 @@ function syncStrategyDescription() {
   els.strategyDescription.textContent = getPreset(els.strategy.value).description;
 }
 
+const MODEL_DESCRIPTIONS = {
+  bs: 'Constant volatility, no jumps. The closed form is exact.',
+  merton:
+    'Poisson jumps with lognormal size. The series is exact; the Monte Carlo shows convergence.',
+};
+
+function syncModelControls() {
+  const isMerton = els.model.value === 'merton';
+  els.jumpParams.hidden = !isMerton;
+  els.modelDescription.textContent = MODEL_DESCRIPTIONS[els.model.value] ?? '';
+}
+
 function syncPathsReadout() {
   els.pathsReadout.textContent = Number(els.paths.value).toLocaleString();
 }
 
 function wireEvents() {
   els.strategy.addEventListener('change', syncStrategyDescription);
+  els.model.addEventListener('change', syncModelControls);
   els.paths.addEventListener('input', syncPathsReadout);
   els.run.addEventListener('click', runSimulation);
   els.cancel.addEventListener('click', cancelSimulation);
@@ -346,6 +369,7 @@ function wireEvents() {
 async function boot() {
   populateStrategies();
   syncPathsReadout();
+  syncModelControls();
   wireEvents();
 
   try {
@@ -355,7 +379,11 @@ async function boot() {
 
     const params = readParams();
     const bench = benchmarkEngine(
-      { bs_price: (s, k, t, r, q, sigma, isCall) => bs_greeks(s, k, t, r, q, sigma, isCall)[0] },
+      {
+        bs_price: (s, k, t, r, q, sigma, isCall) => bs_greeks(s, k, t, r, q, sigma, isCall)[0],
+        merton_price: (s, k, t, r, q, sigma, isCall, lambda, muJ, deltaJ) =>
+          merton_greeks(s, k, t, r, q, sigma, isCall, lambda, muJ, deltaJ)[0],
+      },
       params,
       2000,
     );

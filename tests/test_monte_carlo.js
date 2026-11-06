@@ -11,8 +11,19 @@ import init, {
   mc_european,
   mc_greeks,
   mc_paths_sample,
+  merton_price,
+  merton_greeks,
+  mc_merton_european,
+  mc_merton_greeks,
+  mc_merton_paths_sample,
 } from '../src/wasm/engine.js';
-import { bsGreeks, bsPrice, normCdf } from '../src/lib/bs_benchmark.js';
+import {
+  bsGreeks,
+  bsPrice,
+  mertonGreeks,
+  mertonPrice,
+  normCdf,
+} from '../src/lib/bs_benchmark.js';
 
 const wasmBytes = readFileSync(new URL('../src/wasm/engine_bg.wasm', import.meta.url));
 await init({ module_or_path: wasmBytes });
@@ -159,6 +170,146 @@ ok('mc_paths_sample is reproducible for a fixed seed', () => {
   const a = mc_paths_sample(S, T, R, Q, SIGMA, 8, 10, 1337n);
   const b = mc_paths_sample(S, T, R, Q, SIGMA, 8, 10, 1337n);
   assert.deepEqual(a, b);
+});
+
+// --- Merton jump-diffusion -------------------------------------------------
+const LAMBDA = 1.0;
+const MU_J = -0.1;
+const DELTA_J = 0.15;
+
+ok('WASM merton_price matches the JS reference within 1e-9', () => {
+  for (const isCall of [true, false]) {
+    for (const [s, k, t, r, q, sigma, lambda, muJ, deltaJ] of [
+      [100, 100, 1, 0.05, 0, 0.2, 1.0, -0.1, 0.15],
+      [100, 120, 0.5, 0.03, 0.01, 0.35, 0.5, -0.05, 0.2],
+      [50, 45, 2, 0.07, 0.02, 0.15, 2.0, 0.0, 0.1],
+      [100, 80, 0.25, 0.01, 0.0, 0.6, 0.25, -0.2, 0.3],
+    ]) {
+      const wasm = merton_price(s, k, t, r, q, sigma, isCall, lambda, muJ, deltaJ);
+      const js = mertonPrice(s, k, t, r, q, sigma, isCall, lambda, muJ, deltaJ);
+      assert.ok(
+        Math.abs(wasm - js) < 1e-9,
+        `price mismatch s=${s} k=${k} call=${isCall}: ${wasm} vs ${js}`,
+      );
+    }
+  }
+});
+
+ok('WASM merton_greeks matches the JS reference within 1e-9', () => {
+  for (const isCall of [true, false]) {
+    const wasm = merton_greeks(S, K, T, R, Q, SIGMA, isCall, LAMBDA, MU_J, DELTA_J);
+    const js = mertonGreeks(S, K, T, R, Q, SIGMA, isCall, LAMBDA, MU_J, DELTA_J);
+    assert.equal(wasm.length, 6);
+    const names = ['price', 'delta', 'gamma', 'vega', 'theta', 'rho'];
+    names.forEach((name, i) => {
+      assert.ok(
+        Math.abs(wasm[i] - js[name]) < 1e-9,
+        `${name} mismatch (call=${isCall}): ${wasm[i]} vs ${js[name]}`,
+      );
+    });
+  }
+});
+
+ok('Merton lambda=0 reproduces Black-Scholes bit-for-bit', () => {
+  const bs = bs_greeks(S, K, T, R, Q, SIGMA, true);
+  const m = merton_greeks(S, K, T, R, Q, SIGMA, true, 0, MU_J, DELTA_J);
+  assert.deepEqual(Array.from(m), Array.from(bs));
+
+  const bsMc = mc_greeks(S, K, T, R, Q, SIGMA, true, 20_000, SEED);
+  const mMc = mc_merton_greeks(S, K, T, R, Q, SIGMA, true, 0, MU_J, DELTA_J, 20_000, SEED);
+  assert.deepEqual(Array.from(mMc), Array.from(bsMc));
+
+  const bsPaths = mc_paths_sample(S, T, R, Q, SIGMA, 8, 10, SEED);
+  const mPaths = mc_merton_paths_sample(S, T, R, Q, SIGMA, 0, MU_J, DELTA_J, 8, 10, SEED);
+  assert.deepEqual(Array.from(mPaths), Array.from(bsPaths));
+});
+
+ok('Merton with zero-size jumps reduces to Black-Scholes within 1e-12', () => {
+  // kappa = 0, so r_n = r and sigma_n = sigma. The weights still sum to 1 and
+  // sum w_n (n - L) = 0, so the series collapses onto Black-Scholes even though
+  // roughly twenty terms are active.
+  const bs = bsGreeks(S, K, T, R, Q, SIGMA, true);
+  const m = mertonGreeks(S, K, T, R, Q, SIGMA, true, 1.5, 0, 0);
+  for (const name of ['price', 'delta', 'gamma', 'vega', 'theta', 'rho']) {
+    assert.ok(Math.abs(m[name] - bs[name]) < 1e-12, `${name}: ${m[name]} vs ${bs[name]}`);
+  }
+});
+
+ok('Merton analytic Greeks match central finite differences of merton_price', () => {
+  const g = mertonGreeks(S, K, T, R, Q, SIGMA, true, LAMBDA, MU_J, DELTA_J);
+  const price = (s, t, r, sigma) =>
+    mertonPrice(s, K, t, r, Q, sigma, true, LAMBDA, MU_J, DELTA_J);
+
+  const hs = 1e-4;
+  const delta = (price(S + hs, T, R, SIGMA) - price(S - hs, T, R, SIGMA)) / (2 * hs);
+  const gamma =
+    (price(S + hs, T, R, SIGMA) - 2 * g.price + price(S - hs, T, R, SIGMA)) / (hs * hs);
+  const hsig = 1e-5;
+  const vega = (price(S, T, R, SIGMA + hsig) - price(S, T, R, SIGMA - hsig)) / (2 * hsig);
+  const hr = 1e-5;
+  const rho = (price(S, T, R + hr, SIGMA) - price(S, T, R - hr, SIGMA)) / (2 * hr);
+  const ht = 1e-5;
+  const theta = -(price(S, T + ht, R, SIGMA) - price(S, T - ht, R, SIGMA)) / (2 * ht);
+
+  assert.ok(Math.abs(g.delta - delta) < 1e-7, `delta ${g.delta} vs ${delta}`);
+  assert.ok(Math.abs(g.gamma - gamma) < 1e-5, `gamma ${g.gamma} vs ${gamma}`);
+  // A missing sigma/sigma_n chain-rule factor moves vega by about 5.9 here, so
+  // this tolerance catches it by six orders of magnitude.
+  assert.ok(Math.abs(g.vega - vega) < 1e-6, `vega ${g.vega} vs ${vega}`);
+  assert.ok(Math.abs(g.theta - theta) < 1e-6, `theta ${g.theta} vs ${theta}`);
+  assert.ok(Math.abs(g.rho - rho) < 1e-6, `rho ${g.rho} vs ${rho}`);
+});
+
+ok('Merton put-call parity holds in WASM and JS within 1e-10', () => {
+  const forwardDiff = S * Math.exp(-Q * T) - K * Math.exp(-R * T);
+  const wasmCall = merton_price(S, K, T, R, Q, SIGMA, true, LAMBDA, MU_J, DELTA_J);
+  const wasmPut = merton_price(S, K, T, R, Q, SIGMA, false, LAMBDA, MU_J, DELTA_J);
+  assert.ok(Math.abs(wasmCall - wasmPut - forwardDiff) < 1e-10, 'WASM parity');
+  const jsCall = mertonPrice(S, K, T, R, Q, SIGMA, true, LAMBDA, MU_J, DELTA_J);
+  const jsPut = mertonPrice(S, K, T, R, Q, SIGMA, false, LAMBDA, MU_J, DELTA_J);
+  assert.ok(Math.abs(jsCall - jsPut - forwardDiff) < 1e-10, 'JS parity');
+});
+
+ok('mc_merton converges to the analytic series for call and put', () => {
+  // Tolerances are set at roughly 4 standard deviations of the estimator at
+  // PATHS = 100k, measured over eight seeds. The call's vega is the noisiest
+  // Greek (sd 0.218) because the volatility bump interacts with the jump
+  // mixture; the put's is three times tighter (sd 0.082). Do not widen these
+  // without re-measuring: they still have to catch the two bugs they exist for.
+  //   - omitting the sigma/sigma_n chain rule moves vega by 5.9 (6.5x the bound)
+  //   - omitting the Poisson generator shift moves theta by 3.42 (34x the bound)
+  const bounds = {
+    price: 0.15,
+    delta: 0.008,
+    gamma: 0.003,
+    vega: 0.9,
+    theta: 0.1,
+    rho: 0.3,
+  };
+
+  for (const isCall of [true, false]) {
+    const series = mertonGreeks(S, K, T, R, Q, SIGMA, isCall, LAMBDA, MU_J, DELTA_J);
+    const mc = mc_merton_greeks(S, K, T, R, Q, SIGMA, isCall, LAMBDA, MU_J, DELTA_J, PATHS, SEED);
+    assert.equal(mc.length, 7);
+    const [price, stdErr, delta, gamma, vega, theta, rho] = mc;
+    assert.ok(stdErr > 0, `stdErr ${stdErr}`);
+    const got = { price, delta, gamma, vega, theta, rho };
+    for (const [name, bound] of Object.entries(bounds)) {
+      assert.ok(
+        Math.abs(got[name] - series[name]) < bound,
+        `${name} (call=${isCall}): ${got[name]} vs ${series[name]}, bound ${bound}`,
+      );
+    }
+
+    const e = mc_merton_european(
+      S, K, T, R, Q, SIGMA, isCall, LAMBDA, MU_J, DELTA_J, PATHS, SEED,
+    );
+    assert.equal(e.length, 2);
+    assert.ok(
+      Math.abs(e[0] - series.price) < bounds.price,
+      `european price ${e[0]} vs ${series.price}`,
+    );
+  }
 });
 
 console.log(`\ntest_monte_carlo.js: ${checks} checks passed`);

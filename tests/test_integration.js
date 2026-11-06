@@ -8,7 +8,14 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import init, { bs_greeks, mc_greeks, mc_paths_sample } from '../src/wasm/engine.js';
+import init, {
+  bs_greeks,
+  mc_greeks,
+  mc_paths_sample,
+  merton_greeks,
+  mc_merton_greeks,
+  mc_merton_paths_sample,
+} from '../src/wasm/engine.js';
 import {
   CHUNK_COUNT,
   CancelledError,
@@ -269,6 +276,56 @@ ok('WASM analytic price matches the JS reference inside the pipeline', () => {
     const js = bsPrice(PARAMS.s, leg.strike, PARAMS.t, PARAMS.r, PARAMS.q, PARAMS.sigma, leg.type === 'call');
     assert.ok(Math.abs(wasm - js) < 1e-9, `leg ${leg.type} ${leg.strike}: ${wasm} vs ${js}`);
   }
+});
+
+// --- Merton jump-diffusion pipeline ---------------------------------------
+// A separate engine object rather than adding to the shared one, so the
+// Black-Scholes tests above keep exercising exactly the mock they always did.
+const mertonEngine = {
+  ...engine,
+  merton_greeks,
+  mc_merton_greeks,
+  mc_merton_paths_sample,
+};
+const MERTON_PARAMS = { ...PARAMS, model: 'merton', lambda: 1.0, muJ: -0.1, deltaJ: 0.15 };
+
+await okAsync('the Merton strategy -> worker -> WASM pipeline completes and converges', async () => {
+  const result = await runSimulationJob(mertonEngine, { ...MERTON_PARAMS, legs: straddleLegs });
+  assert.equal(result.model, 'merton');
+  assert.ok(result.mc.stdErr > 0, 'stdErr must be positive');
+  assert.ok(
+    Math.abs(result.mc.price - result.bs.price) <= 3 * result.mc.stdErr,
+    `price ${result.mc.price} vs ${result.bs.price}, tolerance ${3 * result.mc.stdErr}`,
+  );
+
+  // The analytic leg must agree with the strategy module's own Merton path.
+  const direct = aggregateStrategy(mertonEngine, MERTON_PARAMS, straddleLegs);
+  assert.ok(
+    Math.abs(result.bs.price - direct.price) < 1e-12,
+    'analytic leg must match strategies.js',
+  );
+
+  // Jumps must actually change the answer. A Merton straddle is worth more than
+  // a Black-Scholes one at these parameters, so a dispatch bug that silently
+  // fell back to Black-Scholes would be caught here rather than passing as a
+  // plausible-looking number.
+  const bsResult = await runSimulationJob(engine, { ...PARAMS, legs: straddleLegs });
+  assert.ok(
+    result.bs.price > bsResult.bs.price,
+    `Merton straddle ${result.bs.price} must exceed Black-Scholes ${bsResult.bs.price}`,
+  );
+});
+
+await okAsync('the Merton pipeline with lambda=0 reproduces Black-Scholes bit-for-bit', async () => {
+  const bsResult = await runSimulationJob(engine, { ...PARAMS, legs: straddleLegs });
+  const zero = await runSimulationJob(mertonEngine, {
+    ...MERTON_PARAMS,
+    lambda: 0,
+    legs: straddleLegs,
+  });
+  assert.deepEqual(zero.mc, bsResult.mc);
+  assert.deepEqual(zero.bs, bsResult.bs);
+  assert.deepEqual(Array.from(zero.samplePaths), Array.from(bsResult.samplePaths));
 });
 
 console.log(`\ntest_integration.js: ${checks} checks passed`);

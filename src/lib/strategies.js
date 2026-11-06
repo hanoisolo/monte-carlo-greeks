@@ -102,6 +102,10 @@ function roundStrike(value) {
  */
 export function aggregateStrategy(engine, params, legs) {
   const { s, t, r, q, sigma } = params;
+  const useMerton = params.model === 'merton' && typeof engine.merton_greeks === 'function';
+  const lambda = params.lambda ?? 0;
+  const muJ = params.muJ ?? 0;
+  const deltaJ = params.deltaJ ?? 0;
   let price = 0;
   let delta = 0;
   let gamma = 0;
@@ -111,7 +115,9 @@ export function aggregateStrategy(engine, params, legs) {
 
   const legDetails = legs.map((leg) => {
     const isCall = leg.type === 'call';
-    const g = engine.bs_greeks(s, leg.strike, t, r, q, sigma, isCall);
+    const g = useMerton
+      ? engine.merton_greeks(s, leg.strike, t, r, q, sigma, isCall, lambda, muJ, deltaJ)
+      : engine.bs_greeks(s, leg.strike, t, r, q, sigma, isCall);
     const weight = leg.side * leg.qty;
     price += weight * g[0];
     delta += weight * g[1];
@@ -142,6 +148,10 @@ export function aggregateStrategy(engine, params, legs) {
  */
 export function aggregateStrategyMonteCarlo(engine, params, legs, nPaths, seed) {
   const { s, t, r, q, sigma } = params;
+  const useMerton = params.model === 'merton' && typeof engine.mc_merton_greeks === 'function';
+  const lambda = params.lambda ?? 0;
+  const muJ = params.muJ ?? 0;
+  const deltaJ = params.deltaJ ?? 0;
   const seedBig = BigInt(seed);
   let price = 0;
   let delta = 0;
@@ -154,7 +164,22 @@ export function aggregateStrategyMonteCarlo(engine, params, legs, nPaths, seed) 
   for (const leg of legs) {
     const isCall = leg.type === 'call';
     const weight = leg.side * leg.qty;
-    const g = engine.mc_greeks(s, leg.strike, t, r, q, sigma, isCall, nPaths, seedBig);
+    const g = useMerton
+      ? engine.mc_merton_greeks(
+          s,
+          leg.strike,
+          t,
+          r,
+          q,
+          sigma,
+          isCall,
+          lambda,
+          muJ,
+          deltaJ,
+          nPaths,
+          seedBig,
+        )
+      : engine.mc_greeks(s, leg.strike, t, r, q, sigma, isCall, nPaths, seedBig);
     price += weight * g[0];
     delta += weight * g[2];
     gamma += weight * g[3];
