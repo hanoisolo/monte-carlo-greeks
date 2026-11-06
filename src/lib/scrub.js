@@ -123,6 +123,17 @@ export function createScrubController({
       timer = setTimer(fire, debounceMs);
     },
 
+    // Slider drag: refresh the analytic column and drop any in-flight job, but
+    // never schedule a run. A drag produces input events faster than any
+    // debounce, and a pause between steps would otherwise launch a Monte Carlo
+    // mid-drag and repaint the columns under the user's hand. The run waits for
+    // release (flush).
+    preview() {
+      clear();
+      if (onCancelMc) onCancelMc();
+      if (onAnalytic) onAnalytic();
+    },
+
     // Release (slider up, dropdown chosen): same as scrub but runs the Monte
     // Carlo immediately instead of waiting out the debounce.
     flush() {

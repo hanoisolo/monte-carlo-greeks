@@ -408,13 +408,23 @@ function wireEvents() {
   ];
   for (const input of scrubInputs) {
     input.addEventListener('input', () => {
+      if (isValidParams(readParams())) scrubController.preview();
+    });
+    // Commit (blur, Enter, spinner click) schedules the run. Unlike the slider,
+    // this goes through the debounce: a number input fires `change` on every
+    // arrow-key repeat, so tabbing through fields or holding an arrow would
+    // otherwise spawn one run per keystroke, each aborting the last.
+    input.addEventListener('change', () => {
       if (isValidParams(readParams())) scrubController.scrub();
     });
   }
 
   els.paths.addEventListener('input', () => {
     syncPathsReadout();
-    if (isValidParams(readParams())) scrubController.scrub();
+    // A drag emits input events faster than any debounce, and a pause between
+    // steps would launch a Monte Carlo mid-drag. Refresh the analytic column
+    // and wait for release.
+    if (isValidParams(readParams())) scrubController.preview();
   });
   els.paths.addEventListener('change', () => {
     if (isValidParams(readParams())) scrubController.flush();

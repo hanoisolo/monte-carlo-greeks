@@ -226,6 +226,38 @@ ok('a burst of scrubs coalesces into exactly one Monte Carlo run', () => {
   assert.equal(calls.run, 1, 'the burst produces a single run');
 });
 
+ok('preview refreshes the analytic column but never schedules a run', () => {
+  const { calls, timers, controller } = harness();
+  controller.preview();
+  assert.equal(calls.analytic, 1, 'the analytic column still refreshes');
+  assert.equal(calls.cancel, 1, 'an in-flight job is dropped');
+  assert.equal(calls.run, 0);
+  assert.equal(timers.count(), 0, 'preview must not arm a timer');
+  assert.equal(controller.isPending(), false);
+});
+
+ok('a slider drag produces zero runs until release', () => {
+  const { calls, timers, controller } = harness();
+  // A drag emits many input events; none of them may start a Monte Carlo.
+  for (let i = 0; i < 20; i += 1) controller.preview();
+  assert.equal(calls.analytic, 20);
+  assert.equal(calls.run, 0, 'no run may fire mid-drag');
+  assert.equal(timers.count(), 0, 'no timer may survive a drag step');
+  // Release.
+  controller.flush();
+  assert.equal(calls.run, 1, 'release runs exactly once');
+});
+
+ok('preview cancels a timer armed by an earlier scrub', () => {
+  const { calls, timers, controller } = harness();
+  controller.scrub();
+  assert.equal(timers.count(), 1);
+  controller.preview();
+  assert.equal(timers.count(), 0, 'the pending run is dropped');
+  timers.runAll();
+  assert.equal(calls.run, 0);
+});
+
 ok('flush runs the Monte Carlo immediately without waiting', () => {
   const { calls, timers, controller } = harness();
   controller.flush();
