@@ -304,6 +304,13 @@ button:disabled {
   margin-bottom: 12px;
 }
 
+/* Same trap as .field-grid: the author `display: flex` above beats the UA
+   stylesheet's `[hidden] { display: none }`, so the attribute alone would not
+   hide the bar when a run finishes. */
+.progress[hidden] {
+  display: none;
+}
+
 .progress-bar {
   flex: 1;
   height: 5px;
