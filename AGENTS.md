@@ -104,6 +104,40 @@ options.inguyen.ca.  CNAME  hanoisolo.github.io.
 Do not add an A record for a subdomain. The apex `inguyen.ca` is a separate
 record set and is unaffected.
 
+### When a deploy hangs
+
+`deploy-pages` can hang in `updating_pages` until its 600s timeout. The workflow
+job is cancelled, but the Pages-side deployment stays marked in progress and
+blocks every later deploy with:
+
+```
+Deployment request failed for <sha> due to in progress deployment.
+Please cancel <old-sha> first or wait for it to complete.
+```
+
+Re-running the failed job does **not** clear it. The retry collides with the
+cancelled record and fails instantly with `Deployment cancelled`, which reads
+like a fresh problem but is the same one. Cancel the stuck deployment by its
+build version (the commit SHA), then re-run:
+
+```bash
+gh run view <run-id> --log-failed
+gh api -X POST repos/hanoisolo/monte-carlo-greeks/pages/deployments/<stuck-sha>/cancel
+gh run rerun <run-id> --failed
+```
+
+The cancel returns 204 with no body; confirm with
+`gh api repos/hanoisolo/monte-carlo-greeks/pages/deployments/<stuck-sha>`,
+which should report `{"status":"deployment_cancelled"}`.
+
+One caveat: a run whose **own** SHA already has a cancelled deployment record
+cannot be re-run — it will keep failing with `Deployment cancelled`. That case
+needs a new commit SHA (an empty commit is enough). Cancelling the *other*
+stuck deployment is what unblocks it.
+
+`gh` is installed and authenticated via the OS keyring, so these work without
+a token in the environment.
+
 ## Known limitations
 
 - **Net standard error ignores inter-leg covariance.** `aggregateStrategyMonteCarlo`
