@@ -9,12 +9,19 @@ import init, { bs_greeks, merton_greeks } from './wasm/engine.js';
 import { benchmarkEngine } from './lib/bs_benchmark.js';
 import {
   STRATEGY_PRESETS,
+  aggregateStrategy,
   buildLegs,
   computePayoffCurve,
   findBreakevens,
   getPreset,
   maxProfitLoss,
 } from './lib/strategies.js';
+import {
+  buildGreeksRows,
+  createScrubController,
+  fmt,
+  isValidParams,
+} from './lib/scrub.js';
 import {
   renderConvergenceChart,
   renderPathFan,
@@ -59,35 +66,16 @@ const els = {
   canvasConvergence: $('canvas-convergence'),
 };
 
-const GREEK_ROWS = [
-  { key: 'price', label: 'Price' },
-  { key: 'delta', label: 'Delta' },
-  { key: 'gamma', label: 'Gamma' },
-  { key: 'vega', label: 'Vega' },
-  { key: 'theta', label: 'Theta' },
-  { key: 'rho', label: 'Rho' },
-];
-
 const state = {
   jobId: 0,
   running: false,
   worker: null,
   lastResult: null,
+  lastBs: null,
+  wasmReady: false,
   convergence: [],
   activeView: 'paths',
 };
-
-// --- Formatting ------------------------------------------------------------
-
-const fmt = (value, digits = 4) =>
-  Number.isFinite(value) ? value.toFixed(digits) : '—';
-
-function diffClass(absDiff, scale) {
-  const ratio = Math.abs(absDiff) / (Math.abs(scale) || 1);
-  if (ratio < 0.01) return 'diff-good';
-  if (ratio < 0.05) return 'diff-warn';
-  return 'diff-bad';
-}
 
 // --- Parameter reading -----------------------------------------------------
 
@@ -118,19 +106,14 @@ function readParams() {
 
 function renderGreeksTable(mc, bs) {
   els.greeksBody.replaceChildren();
-  for (const row of GREEK_ROWS) {
-    const mcValue = mc[row.key];
-    const bsValue = bs[row.key];
-    const absDiff = mcValue - bsValue;
-    const relDiff = bsValue === 0 ? 0 : absDiff / Math.abs(bsValue);
-
+  for (const row of buildGreeksRows(mc, bs)) {
     const tr = document.createElement('tr');
     const cells = [
       { text: row.label, className: 'greek-name' },
-      { text: fmt(mcValue) },
-      { text: fmt(bsValue) },
-      { text: fmt(absDiff), className: diffClass(absDiff, bsValue) },
-      { text: `${(relDiff * 100).toFixed(2)}%`, className: diffClass(absDiff, bsValue) },
+      { text: row.mcText },
+      { text: row.bsText },
+      { text: row.absDiffText, className: row.diffClassName },
+      { text: row.relDiffText, className: row.diffClassName },
     ];
     for (const cell of cells) {
       const td = document.createElement('td');
@@ -140,6 +123,30 @@ function renderGreeksTable(mc, bs) {
     }
     els.greeksBody.append(tr);
   }
+}
+
+// --- Analytic preview ------------------------------------------------------
+
+function computeAnalytic(params) {
+  return aggregateStrategy({ bs_greeks, merton_greeks }, params, params.legs);
+}
+
+// Refreshes the analytic column on every scrub step. The Monte Carlo from the
+// previous parameter set is discarded rather than compared against the new
+// analytic values, which would paint parameter drift as sampling error.
+function updateAnalyticView() {
+  if (!state.wasmReady) return;
+  const params = readParams();
+  if (!isValidParams(params)) return;
+
+  const bs = computeAnalytic(params);
+  state.lastBs = bs;
+  state.lastResult = null;
+  state.convergence = [];
+  els.stdError.textContent = '—';
+  els.elapsed.textContent = '—';
+  renderGreeksTable(null, bs);
+  redrawActive();
 }
 
 function canvasSize(canvas) {
@@ -204,11 +211,18 @@ function drawConvergence() {
 }
 
 function redrawActive() {
-  if (!state.lastResult) return;
   const params = readParams();
-  if (state.activeView === 'paths') drawPaths(state.lastResult, params);
-  else if (state.activeView === 'payoff') drawPayoff(state.lastResult, params);
-  else drawConvergence();
+  if (state.lastResult) {
+    if (state.activeView === 'paths') drawPaths(state.lastResult, params);
+    else if (state.activeView === 'payoff') drawPayoff(state.lastResult, params);
+    else drawConvergence();
+    return;
+  }
+  // No Monte Carlo yet: the payoff curve depends only on the legs and the
+  // analytic premium, so it can track the scrub live.
+  if (state.lastBs && state.activeView === 'payoff') {
+    drawPayoff({ legs: params.legs, bs: state.lastBs }, params);
+  }
 }
 
 // --- Worker lifecycle ------------------------------------------------------
@@ -280,19 +294,31 @@ function onWorkerMessage(event) {
 }
 
 function runSimulation() {
-  if (state.running) return;
+  scrubController.cancelPending();
+  if (state.running) abortInFlightForScrub();
+
   const params = readParams();
+  if (!isValidParams(params)) return;
+
   state.jobId += 1;
   state.convergence = [];
   state.lastResult = null;
-  els.greeksBody.replaceChildren();
-  const placeholder = document.createElement('tr');
-  const td = document.createElement('td');
-  td.colSpan = 5;
-  td.className = 'empty';
-  td.textContent = 'Simulating…';
-  placeholder.append(td);
-  els.greeksBody.append(placeholder);
+
+  // Keep the analytic column visible while the worker runs; blanking the table
+  // would erase the numbers the scrub just computed.
+  if (state.wasmReady) {
+    state.lastBs = computeAnalytic(params);
+    renderGreeksTable(null, state.lastBs);
+  } else {
+    els.greeksBody.replaceChildren();
+    const placeholder = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    td.className = 'empty';
+    td.textContent = 'Simulating…';
+    placeholder.append(td);
+    els.greeksBody.append(placeholder);
+  }
 
   setRunning(true);
   els.progressFill.style.width = '0%';
@@ -300,7 +326,21 @@ function runSimulation() {
   ensureWorker().postMessage({ type: 'RUN_SIM', jobId: state.jobId, params });
 }
 
+// Drops an in-flight job without waiting for SIM_CANCELLED. Bumping jobId makes
+// the worker's late replies fail the guard in onWorkerMessage, and clearing
+// `running` immediately lets the next run start instead of being swallowed by
+// the `if (state.running) return` guard.
+function abortInFlightForScrub() {
+  if (!state.running) return;
+  if (state.worker) {
+    state.worker.postMessage({ type: 'CANCEL_SIM', jobId: state.jobId });
+  }
+  state.jobId += 1;
+  setRunning(false);
+}
+
 function cancelSimulation() {
+  scrubController.cancelPending();
   if (!state.running || !state.worker) return;
   state.worker.postMessage({ type: 'CANCEL_SIM', jobId: state.jobId });
 }
@@ -337,10 +377,49 @@ function syncPathsReadout() {
   els.pathsReadout.textContent = Number(els.paths.value).toLocaleString();
 }
 
+const scrubController = createScrubController({
+  debounceMs: 250,
+  onCancelMc: abortInFlightForScrub,
+  onAnalytic: updateAnalyticView,
+  onRunMc: runSimulation,
+});
+
 function wireEvents() {
-  els.strategy.addEventListener('change', syncStrategyDescription);
-  els.model.addEventListener('change', syncModelControls);
-  els.paths.addEventListener('input', syncPathsReadout);
+  els.strategy.addEventListener('change', () => {
+    syncStrategyDescription();
+    if (isValidParams(readParams())) scrubController.flush();
+  });
+  els.model.addEventListener('change', () => {
+    syncModelControls();
+    if (isValidParams(readParams())) scrubController.flush();
+  });
+
+  const scrubInputs = [
+    els.spot,
+    els.strike,
+    els.time,
+    els.rate,
+    els.dividend,
+    els.volatility,
+    els.lambda,
+    els.muJ,
+    els.deltaJ,
+    els.seed,
+  ];
+  for (const input of scrubInputs) {
+    input.addEventListener('input', () => {
+      if (isValidParams(readParams())) scrubController.scrub();
+    });
+  }
+
+  els.paths.addEventListener('input', () => {
+    syncPathsReadout();
+    if (isValidParams(readParams())) scrubController.scrub();
+  });
+  els.paths.addEventListener('change', () => {
+    if (isValidParams(readParams())) scrubController.flush();
+  });
+
   els.run.addEventListener('click', runSimulation);
   els.cancel.addEventListener('click', cancelSimulation);
 
@@ -374,8 +453,10 @@ async function boot() {
 
   try {
     await init();
+    state.wasmReady = true;
     setBadge('ready', 'ENGINE READY');
     els.footerStatus.textContent = 'engine ready';
+    updateAnalyticView();
 
     const params = readParams();
     const bench = benchmarkEngine(

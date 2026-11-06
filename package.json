@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node tests/test_monte_carlo.js && node tests/test_strategies.js && node tests/check_renderer.js && node tests/test_integration.js",
+    "test": "node tests/test_monte_carlo.js && node tests/test_strategies.js && node tests/test_scrub.js && node tests/check_renderer.js && node tests/test_integration.js",
     "test:rust": "cargo test --manifest-path crates/engine/Cargo.toml"
   },
   "devDependencies": {

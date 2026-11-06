@@ -6,7 +6,7 @@
     <title>Monte Carlo Greeks — options.inguyen.ca</title>
     <meta
       name="description"
-      content="Monte Carlo option pricing and Greeks computed in Rust/WebAssembly, benchmarked against closed-form Black-Scholes."
+      content="Monte Carlo European option pricing and Greeks computed in Rust/WebAssembly, benchmarked against closed-form Black-Scholes."
     />
     <link rel="icon" href="/assets/favicon.ico" />
     <link rel="stylesheet" href="/src/styles.css" />
@@ -22,7 +22,7 @@
         <div class="masthead-text">
           <h1>MONTE CARLO GREEKS</h1>
           <p class="tagline">
-            Rust &rarr; WebAssembly pricing engine &middot; antithetic variates &middot;
+            European option pricing in Rust &rarr; WebAssembly &middot; antithetic variates &middot;
             common-random-number finite differences
           </p>
         </div>
@@ -139,8 +139,9 @@
             </tbody>
           </table>
           <p class="legend">
-            Vega is per 1.00 of volatility, theta per 1.00 year of calendar decay, rho per
-            1.00 of the risk-free rate.
+            European-style exercise: cash-settled at maturity, no early exercise. Vega is per
+            1.00 of volatility, theta per 1.00 year of calendar decay, rho per 1.00 of the
+            risk-free rate.
           </p>
         </section>
 

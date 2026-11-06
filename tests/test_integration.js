@@ -30,6 +30,11 @@ import {
   getPreset,
 } from '../src/lib/strategies.js';
 import { bsPrice } from '../src/lib/bs_benchmark.js';
+import {
+  buildGreeksRows,
+  createScrubController,
+  isValidParams,
+} from '../src/lib/scrub.js';
 
 const wasmBytes = readFileSync(new URL('../src/wasm/engine_bg.wasm', import.meta.url));
 await init({ module_or_path: wasmBytes });
@@ -326,6 +331,156 @@ await okAsync('the Merton pipeline with lambda=0 reproduces Black-Scholes bit-fo
   assert.deepEqual(zero.mc, bsResult.mc);
   assert.deepEqual(zero.bs, bsResult.bs);
   assert.deepEqual(Array.from(zero.samplePaths), Array.from(bsResult.samplePaths));
+});
+
+// --- Analytic-on-scrub -----------------------------------------------------
+//
+// The scrub path computes the analytic column on the main thread while the
+// worker computes the same column off-thread. They must agree, or the table
+// would show two different "analytic" numbers depending on whether the user
+// had scrubbed or run.
+
+const scrubEngine = { bs_greeks, merton_greeks };
+
+function scrubParams(overrides = {}) {
+  return {
+    ...PARAMS,
+    k: 100,
+    model: 'bs',
+    lambda: 0,
+    muJ: 0,
+    deltaJ: 0,
+    legs: straddleLegs,
+    ...overrides,
+  };
+}
+
+await okAsync('the scrub analytic path matches the worker analytic column', async () => {
+  const params = scrubParams();
+  const workerResult = await runSimulationJob(engine, params);
+  const scrubBs = aggregateStrategy(scrubEngine, params, params.legs);
+
+  for (const key of ['price', 'delta', 'gamma', 'vega', 'theta', 'rho']) {
+    const expected = workerResult.bs[key];
+    const actual = scrubBs[key];
+    const tolerance = 1e-12 * Math.max(1, Math.abs(expected));
+    assert.ok(
+      Math.abs(actual - expected) <= tolerance,
+      `${key}: scrub ${actual} vs worker ${expected}`,
+    );
+  }
+});
+
+ok('scrubbing spot and volatility keeps the analytic column finite', () => {
+  for (const s of [95, 100, 105]) {
+    for (const sigma of [0.15, 0.25]) {
+      const params = scrubParams({ s, sigma });
+      const bs = aggregateStrategy(scrubEngine, params, params.legs);
+      const rows = buildGreeksRows(null, bs);
+      for (const row of rows) {
+        assert.notEqual(
+          row.bsText,
+          '—',
+          `${row.key} must be finite at s=${s} sigma=${sigma}`,
+        );
+        assert.equal(row.mcText, '—', 'no Monte Carlo during a scrub');
+        assert.equal(row.absDiffText, '—');
+        assert.equal(row.relDiffText, '—');
+        assert.equal(row.diffClassName, '', 'a scrub must not paint a diff colour');
+      }
+    }
+  }
+});
+
+ok('the scrub path dispatches to Merton and diverges from Black-Scholes', () => {
+  const bsParams = scrubParams({ model: 'bs' });
+  const mertonParams = scrubParams({
+    model: 'merton',
+    lambda: 1,
+    muJ: -0.1,
+    deltaJ: 0.15,
+  });
+
+  const bs = aggregateStrategy(scrubEngine, bsParams, bsParams.legs);
+  const merton = aggregateStrategy(scrubEngine, mertonParams, mertonParams.legs);
+
+  assert.ok(Number.isFinite(merton.price), 'Merton price must be finite');
+  assert.notEqual(merton.price, bs.price, 'jumps must move the price');
+  assert.notEqual(merton.vega, bs.vega, 'jumps must move vega');
+
+  const rows = buildGreeksRows(null, merton);
+  assert.notEqual(rows[0].bsText, '—');
+});
+
+ok('isValidParams rejects a mid-keystroke set before it reaches WASM', () => {
+  assert.equal(isValidParams(scrubParams()), true);
+  assert.equal(isValidParams(scrubParams({ s: NaN })), false);
+  assert.equal(isValidParams(scrubParams({ sigma: 0 })), false);
+  assert.equal(isValidParams(scrubParams({ legs: [] })), false);
+});
+
+// --- Debounce lifecycle ----------------------------------------------------
+
+function fakeTimers() {
+  let nextId = 1;
+  const timers = new Map();
+  return {
+    setTimer(fn, ms) {
+      const id = nextId++;
+      timers.set(id, { fn, ms });
+      return id;
+    },
+    clearTimer(id) {
+      timers.delete(id);
+    },
+    runAll() {
+      const due = [...timers.values()];
+      timers.clear();
+      for (const t of due) t.fn();
+    },
+    count() {
+      return timers.size;
+    },
+  };
+}
+
+function scrubHarness() {
+  const calls = { analytic: 0, run: 0, cancel: 0 };
+  const timers = fakeTimers();
+  const controller = createScrubController({
+    onAnalytic: () => {
+      calls.analytic += 1;
+    },
+    onRunMc: () => {
+      calls.run += 1;
+    },
+    onCancelMc: () => {
+      calls.cancel += 1;
+    },
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  return { calls, timers, controller };
+}
+
+ok('a scrub burst coalesces into exactly one Monte Carlo run', () => {
+  const { calls, timers, controller } = scrubHarness();
+  for (let i = 0; i < 5; i += 1) controller.scrub();
+  assert.equal(calls.analytic, 5, 'every step refreshes the analytic column');
+  assert.equal(calls.cancel, 5, 'each step drops the in-flight job');
+  assert.equal(calls.run, 0, 'no worker job during the burst');
+  assert.equal(timers.count(), 1);
+  timers.runAll();
+  assert.equal(calls.run, 1);
+});
+
+ok('cancelling a pending scrub prevents the Monte Carlo from starting', () => {
+  const { calls, timers, controller } = scrubHarness();
+  controller.scrub();
+  controller.cancelPending();
+  timers.runAll();
+  assert.equal(calls.run, 0);
+  assert.equal(timers.count(), 0);
 });
 
 console.log(`\ntest_integration.js: ${checks} checks passed`);
